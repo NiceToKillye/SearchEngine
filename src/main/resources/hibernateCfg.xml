@@ -14,5 +14,9 @@
         <property name="hbm2ddl.auto">create-drop</property>
 
         <mapping class="loader.scanner.Website"></mapping>
+        <mapping class="loader.entity.Field"></mapping>
+        <mapping class="loader.entity.Lemma"></mapping>
+        <mapping class="loader.entity.Index"></mapping>
+
     </session-factory>
 </hibernate-configuration>
