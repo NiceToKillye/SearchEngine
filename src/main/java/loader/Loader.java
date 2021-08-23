@@ -2,6 +2,8 @@ package loader;
 
 import loader.entity.Field;
 import loader.scanner.Scanner;
+import loader.scanner.Website;
+import loader.searcher.Searcher;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.boot.Metadata;
@@ -10,6 +12,7 @@ import org.hibernate.boot.registry.StandardServiceRegistry;
 import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
 
 import java.io.IOException;
+import java.util.HashMap;
 
 public class Loader {
     public static void main(String[] args) throws IOException {
@@ -25,6 +28,15 @@ public class Loader {
 
         Scanner scanner = new Scanner(session);
         scanner.scan("http://www.playback.ru/");
+
+
+        Searcher searcher = new Searcher(session);
+        HashMap<Website, Double> websiteRelevancy = searcher.search("iphone");
+
+        websiteRelevancy.keySet().forEach(website -> {
+            System.out.println("Address: " + website.getPath() + " rel = " + websiteRelevancy.get(website));
+        });
+
     }
 
     private static void createField(Session session){
