@@ -4,7 +4,7 @@ import javax.persistence.*;
 
 @Entity
 @Table(
-        name = "field"
+        name = "_field"
 )
 public class Field {
 

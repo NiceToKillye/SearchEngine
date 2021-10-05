@@ -1,55 +1,155 @@
 package loader.scanner;
 
-import loader.entity.Field;
-import loader.entity.Index;
-import loader.entity.Lemma;
+import loader.entity.*;
 import loader.lemmatizer.Lemmatizer;
-import org.hibernate.Session;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
+import javax.annotation.PostConstruct;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ForkJoinPool;
+import java.time.LocalDate;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
+@Service
 public class Scanner {
 
-    private final String USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36";
-    private final String REFERER = "http://www.google.com";
+    @Value("${user.agent}")
+    private String USER_AGENT;
+    @Value("${user.referer}")
+    private String REFERER;
+    @Value("${arrays.websitesToScan}")
+    private String[] websitesToScan;
 
-    private Session session;
+    private final IndexRepository indexRepository;
+    private final WebsiteRepository websiteRepository;
+    private final FieldRepository fieldRepository;
+    private final LemmaRepository lemmaRepository;
+    private final SiteRepository siteRepository;
+
     static Set<String> uniqueWebsiteLinks = ConcurrentHashMap.newKeySet();
 
-    public Scanner(Session session){
-        this.session = session;
-    }
 
-    public Scanner(){
-
+    public Scanner(IndexRepository indexRepository,
+                   WebsiteRepository websiteRepository,
+                   FieldRepository fieldRepository,
+                   LemmaRepository lemmaRepository,
+                   SiteRepository siteRepository){
+        this.indexRepository = indexRepository;
+        this.websiteRepository = websiteRepository;
+        this.fieldRepository = fieldRepository;
+        this.lemmaRepository = lemmaRepository;
+        this.siteRepository = siteRepository;
     }
 
     public void scan(String websiteLink) throws IOException {
         uniqueWebsiteLinks.add(websiteLink);
-        List<String> websiteMap = new ForkJoinPool().invoke(new ScannerTask(websiteLink));
+        List<String> websiteMap = new ForkJoinPool().invoke(new ScannerTask(websiteLink, USER_AGENT, REFERER));
 
-        List<Website> websiteList = getWebsitesList(websiteMap);
+        Site site = createSite(websiteLink);
+
+        List<Website> websiteList = getWebsitesList(websiteMap, websiteLink, site.getId());
         fillDB(websiteList);
         uniqueWebsiteLinks.clear();
-        indexWebsite(websiteList);
+        indexWebsite(websiteList, site.getId());
     }
 
-    private List<Website> getWebsitesList(List<String> websiteMap){
+    @PostConstruct
+    public void scan() throws InterruptedException, IOException {
+        Field firstField = new Field("title", "title", 1.0f);
+        Field secondField = new Field("body", "body", 0.8f);
+
+        fieldRepository.save(firstField);
+        fieldRepository.save(secondField);
+
+        if(websitesToScan.length == 0){
+
+            return;
+        }
+        else if(websitesToScan.length == 1){
+            scan(websitesToScan[0]);
+            return;
+        }
+
+        List<List<String>> linksList = new ArrayList<>();
+        List<Site> siteList = new ArrayList<>();
+        for(String websiteLink : websitesToScan){
+            List<String> websiteMap = new ForkJoinPool().invoke(new ScannerTask(websiteLink, USER_AGENT, REFERER));
+            linksList.add(websiteMap);
+            siteList.add(createSite(websiteLink));
+        }
+
+        List<List<Website>> websitesList = new ArrayList<>();
+        for(int i = 0; i < linksList.size(); i++){
+            websitesList.add(
+                    getWebsitesList(
+                            linksList.get(i),
+                            siteList.get(i).getUrl(),
+                            siteList.get(i).getId()
+                    )
+            );
+        }
+        websitesList.forEach(this::fillDB);
+
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        ExecutorService executorService = Executors.newFixedThreadPool(availableProcessors);
+
+        List<Callable<Boolean>> indexTasks = new ArrayList<>();
+        for(int i = 0; i < websitesList.size(); i++){
+            int finalI = i;
+            indexTasks.add(
+                    () -> {
+                        indexWebsite(websitesList.get(finalI), siteList.get(finalI).getId());
+                        return Boolean.TRUE;
+                    }
+            );
+        }
+        executorService.invokeAll(indexTasks);
+
+        try {
+            executorService.shutdown();
+            executorService.awaitTermination(60, TimeUnit.SECONDS);
+        }
+        catch (Exception exception){
+            System.err.println("Finishing all tasks");
+        }
+        finally {
+            if(!executorService.isTerminated()){
+                executorService.shutdownNow();
+                System.out.println("Finished");
+            }
+            else {
+                System.out.println("Already finished");
+            }
+        }
+    }
+
+    private Site createSite(String websiteLink){
+        Pattern pattern = Pattern.compile("http[s]*://");
+        Matcher matcher = pattern.matcher(websiteLink);
+        String name = matcher.replaceAll("");
+        Site site = new Site(Status.INDEXING, LocalDate.now(), null, websiteLink, name);
+        siteRepository.save(site);
+        return site;
+    }
+
+    private List<Website> getWebsitesList(List<String> websiteMap, String websiteLink, int siteId){
         List<Website> websiteList = new ArrayList<>();
         websiteMap.forEach(website ->{
             Website website1 = new Website();
-            website1.setPath(website);
+            if(website.replace(websiteLink, "").length() == 0){
+                website1.setPath(websiteLink);
+            }
+            else {
+                website1.setPath(website.replace(websiteLink, ""));
+            }
             try {
                 Document document = Jsoup
                         .connect(website)
@@ -62,6 +162,7 @@ public class Scanner {
                 Connection.Response response = Jsoup
                         .connect(website)
                         .userAgent(USER_AGENT)
+                        .referrer(REFERER)
                         .timeout(1000)
                         .execute();
                 website1.setCode(response.statusCode());
@@ -70,6 +171,7 @@ public class Scanner {
                 website1.setCode(504);
                 e.printStackTrace();
             }
+            website1.setSiteId(siteId);
 
             websiteList.add(website1);
         });
@@ -79,27 +181,24 @@ public class Scanner {
 
     private void fillDB(List<Website> websiteList){
         try {
-            session.beginTransaction();
-            websiteList.forEach(website -> session.saveOrUpdate(website));
-            session.getTransaction().commit();
+            websiteRepository.saveAll(websiteList);
         }
         catch (Exception exception){
-            session.getTransaction().rollback();
-            System.out.println("WARNING: The transaction was not completed!");
+            System.out.println("Transaction was not compilied");
         }
     }
 
-    private void indexWebsite(List<Website> websiteList) throws IOException {
+    private void indexWebsite(List<Website> websiteList, int siteId) throws IOException {
         Lemmatizer lemmatizer = new Lemmatizer();
 
-        List<Field> fields = session.createQuery("from Field", Field.class).getResultList();
+        List<Field> fields = fieldRepository.findAll();
 
         websiteList.forEach(website -> {
             if(website.getCode() == 200) {
                 Document document = Jsoup.parse(website.getContent());
                 HashMap<String, Float> lemmas = new HashMap<>();
                 findLemmas(document, lemmatizer, fields, lemmas);
-                HashMap<Lemma, Float> lemmasFromDB = getDBLemmas(lemmas);
+                HashMap<Lemma, Float> lemmasFromDB = getDBLemmas(lemmas, siteId);
                 saveIndex(lemmasFromDB, website);
             }
         });
@@ -143,18 +242,25 @@ public class Scanner {
         });
     }
 
-    private HashMap<Lemma, Float> getDBLemmas(HashMap<String, Float> lemmas){
+    //sdfsdfsdf
+    private HashMap<Lemma, Float> getDBLemmas(HashMap<String, Float> lemmas, int siteId){
         HashMap<Lemma, Float> lemmaList = new HashMap<>();
 
         lemmas.keySet().forEach(lemma -> {
             Lemma dbLemma;
 
             try {
-                dbLemma = session.createQuery("from Lemma where lemma=:lemma", Lemma.class)
-                        .setParameter("lemma", lemma).getSingleResult();
+                dbLemma = lemmaRepository.findLemmaBySiteIdAndLemma(siteId, lemma);
             }
             catch (Exception exception){
-                dbLemma = new Lemma(lemma, 0);
+                List<Lemma> dbLemmas = lemmaRepository.findAllBySiteIdAndLemma(siteId, lemma)
+                        .stream().filter(lemma1 -> lemma1.getLemma().equals(lemma))
+                        .collect(Collectors.toList());
+                dbLemma = dbLemmas.get(0);
+            }
+
+            if(dbLemma == null){
+                dbLemma = new Lemma(siteId, lemma, 0);
             }
 
             dbLemma.incrementFrequency(1);
@@ -167,19 +273,11 @@ public class Scanner {
         return lemmaList;
     }
 
-    private void saveLemmas(HashMap<Lemma, Float> lemmaList){
-        try {
-            session.beginTransaction();
-            lemmaList.keySet().forEach(lemma -> session.saveOrUpdate(lemma));
-            session.getTransaction().commit();
-        }
-        catch (Exception exception){
-            session.getTransaction().rollback();
-            System.out.println("WARNING: The transaction was not completed!");
-        }
+    private synchronized void saveLemmas(HashMap<Lemma, Float> lemmaList){
+        lemmaRepository.saveAll(lemmaList.keySet());
     }
 
-    private void saveIndex(HashMap<Lemma, Float> lemmaList, Website website){
+    private synchronized void saveIndex(HashMap<Lemma, Float> lemmaList, Website website){
         List<Index> indexList = new ArrayList<>();
         int pageId = website.getId();
 
@@ -192,15 +290,6 @@ public class Scanner {
             indexList.add(index);
         });
 
-        try {
-            session.beginTransaction();
-            indexList.forEach(index -> session.saveOrUpdate(index));
-            session.getTransaction().commit();
-        }
-        catch (Exception exception){
-            session.getTransaction().rollback();
-            System.out.println("WARNING: The transaction was not completed!");
-        }
-
+        indexRepository.saveAll(indexList);
     }
 }

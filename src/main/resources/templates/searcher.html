@@ -1,0 +1,23 @@
+<!DOCTYPE HTML>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Searcher</title>
+    <link rel="stylesheet" th:href="@{/css/searcherStyle.css}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Ubuntu">
+</head>
+
+<body>
+<div class="main">
+    <p class="sign" align="center">Ask a question:</p>
+    <div align="center" th:if="${show}" th:text="${errorMessage}" class="alert alert-error">
+        Something went wrong.
+    </div>
+    <form th:action="@{/searcher}" method="POST">
+        <label>
+            <input class="inputField" type="text" id="searchString" name="searchString" align="center" placeholder="search something"/>
+        </label>
+        <button type="submit" class="submit" align="center">Search</button>
+    </form>
+</div>
+</body>
+</html>

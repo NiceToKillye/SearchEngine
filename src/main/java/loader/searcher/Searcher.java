@@ -1,25 +1,31 @@
 package loader.searcher;
 
 
-import loader.entity.Index;
-import loader.entity.Lemma;
+import loader.entity.*;
 import loader.lemmatizer.Lemmatizer;
-import loader.scanner.Website;
-import org.hibernate.Session;
+import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+@Service
 public class Searcher {
 
-    private final Session session;
     private final Lemmatizer lemmatizer;
     private final int FREQUENCY_AMOUNT = 100;
 
-    public Searcher(Session session) throws IOException {
-        this.session = session;
+    private final IndexRepository indexRepository;
+    private final WebsiteRepository websiteRepository;
+    private final LemmaRepository lemmaRepository;
+
+    public Searcher(IndexRepository indexRepository,
+                    WebsiteRepository websiteRepository,
+                    LemmaRepository lemmaRepository) throws IOException {
+        this.indexRepository = indexRepository;
+        this.websiteRepository = websiteRepository;
+        this.lemmaRepository = lemmaRepository;
         lemmatizer = new Lemmatizer();
     }
 
@@ -28,8 +34,7 @@ public class Searcher {
         if(lemmas.isEmpty()){
             return new HashMap<>();
         }
-        List<Integer> websiteIds = session.createQuery("from Index where lemmaId=:lemmaId", Index.class)
-                .setParameter("lemmaId", lemmas.get(0).getId()).getResultList()
+        List<Integer> websiteIds = indexRepository.findAllByLemmaId(lemmas.get(0).getId())
                 .stream().map(Index::getPageId).collect(Collectors.toList());
 
         HashMap<Integer, Boolean> suitabilityWebsites = new HashMap<>();
@@ -52,13 +57,7 @@ public class Searcher {
         lemmas.keySet().forEach(lemma -> {
             Lemma dbLemma;
 
-            try {
-                dbLemma = session.createQuery("from Lemma where lemma=:lemma", Lemma.class)
-                        .setParameter("lemma", lemma).getSingleResult();
-            }
-            catch (Exception exception){
-                dbLemma = null;
-            }
+            dbLemma = lemmaRepository.findLemmaByLemma(lemma);
 
             if(dbLemma != null){
                 lemmaList.add(dbLemma);
@@ -89,10 +88,7 @@ public class Searcher {
         Index index;
 
         try {
-            index = session.createQuery("from Index where lemmaId=:lemmaId and pageId=:pageId", Index.class)
-                    .setParameter("lemmaId", lemmaId)
-                    .setParameter("pageId", pageId)
-                    .getSingleResult();
+            index = indexRepository.findByLemmaIdAndPageId(lemmaId, pageId);
         }
         catch (Exception exception){
             index = null;
@@ -110,8 +106,7 @@ public class Searcher {
             Website website;
 
             try {
-                website = session.createQuery("from Website where id=:id", Website.class)
-                        .setParameter("id", websiteId).getSingleResult();
+                website = websiteRepository.findById(websiteId).get();
             }
             catch (Exception exception){
                 website = null;
@@ -130,10 +125,9 @@ public class Searcher {
 
         websites.forEach(website -> {
 
-            List<Index> indexList = session.createQuery("from Index where lemmaId in :lemmaIds and pageId=:pageId", Index.class)
-                    .setParameter("lemmaIds", lemmas.stream().map(Lemma::getId).collect(Collectors.toList()))
-                    .setParameter("pageId", website.getId())
-                    .getResultList();
+            List<Index> indexList = indexRepository.findAllByLemmaIdInAndPageId(
+                    lemmas.stream().map(Lemma::getId).collect(Collectors.toList()), website.getId()
+            );
 
             double relevancy = indexList.stream().mapToDouble(Index::getRank).sum();
 

@@ -4,13 +4,19 @@ import javax.persistence.*;
 
 @Entity
 @Table(
-        name = "lemma"
+        name = "_lemma"
 )
 public class Lemma {
 
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private int id;
+
+    @Column(
+            name = "site_id",
+            nullable = false
+    )
+    private int siteId;
 
     @Column(
             nullable = false
@@ -22,7 +28,8 @@ public class Lemma {
     )
     private int frequency;
 
-    public Lemma(String lemma, int frequency) {
+    public Lemma(int siteId, String lemma, int frequency) {
+        this.siteId = siteId;
         this.lemma = lemma;
         this.frequency = frequency;
     }
@@ -35,8 +42,12 @@ public class Lemma {
         return id;
     }
 
-    public void setId(int id) {
-        this.id = id;
+    public int getSiteId() {
+        return siteId;
+    }
+
+    public void setSiteId(int siteId) {
+        this.siteId = siteId;
     }
 
     public String getLemma() {
@@ -64,6 +75,7 @@ public class Lemma {
     public String toString() {
         return "Lemma{" +
                 "id=" + id +
+                ", siteId=" + siteId +
                 ", lemma='" + lemma + '\'' +
                 ", frequency=" + frequency +
                 '}';

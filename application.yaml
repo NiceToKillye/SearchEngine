@@ -1,0 +1,16 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    database: mysql
+  datasource:
+    url: jdbc:mysql://localhost:3306/search_engine
+    username: root
+    password: roottoor
+    table-prefix: search_engine
+user:
+  agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36
+  referer: http://www.google.com
+arrays:
+  websitesToScan: https://ipfran.ru/

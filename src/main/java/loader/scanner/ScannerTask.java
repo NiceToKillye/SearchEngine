@@ -3,18 +3,27 @@ package loader.scanner;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.RecursiveTask;
 
+@Async
 public class ScannerTask extends RecursiveTask<List<String>> {
 
     private final String websiteStartLink;
+    private String userAgent;
+    private String referer;
 
-    public ScannerTask(String websiteLink){
+    public ScannerTask(String websiteLink,
+                       String userAgent,
+                       String referer){
         this.websiteStartLink = websiteLink;
+        this.userAgent = userAgent;
+        this.referer = referer;
     }
 
     @Override
@@ -29,7 +38,14 @@ public class ScannerTask extends RecursiveTask<List<String>> {
         try{
             List<ScannerTask> subTasksList = new LinkedList<>();
 
-            Document document = Jsoup.connect(websiteStartLink).maxBodySize(0).get();
+            Document document = Jsoup
+                    .connect(websiteStartLink)
+                    .userAgent(userAgent)
+                    .referrer(referer)
+                    .maxBodySize(0)
+                    .get();
+
+            //Jsoup.connect(websiteStartLink).maxBodySize(0).get();
             Thread.sleep(1000);
 
             Elements urls = document.body().getElementsByTag("a");
@@ -44,7 +60,7 @@ public class ScannerTask extends RecursiveTask<List<String>> {
                 }
                 if (link.startsWith(websiteStartLink) && !Scanner.uniqueWebsiteLinks.contains(link)) {
                     Scanner.uniqueWebsiteLinks.add(link);
-                    ScannerTask task = new ScannerTask(link);
+                    ScannerTask task = new ScannerTask(link, userAgent, referer);
                     task.fork();
                     subTasksList.add(task);
                 }

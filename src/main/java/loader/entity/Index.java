@@ -4,7 +4,7 @@ import javax.persistence.*;
 
 @Entity
 @Table(
-        name = "page_index"
+        name = "_page_index"
 )
 public class Index {
 
